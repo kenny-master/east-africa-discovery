@@ -1,0 +1,14 @@
+require("dotenv").config();
+const express=require("express"),{Pool}=require("pg"),path=require("path");
+const app=express(),port=process.env.PORT||3000;
+app.use(express.json({limit:"30kb"})); app.use(express.static(path.join(__dirname,"public")));
+const pool=process.env.DATABASE_URL?new Pool({connectionString:process.env.DATABASE_URL,ssl:process.env.PGSSL==="true"?{rejectUnauthorized:false}:false}):null;
+app.get("/api/health",async(_q,s)=>{let db="not-configured";if(pool){try{await pool.query("SELECT 1");db="connected"}catch{db="error"}}s.json({status:"ok",database:db})});
+app.get("/api/countries",(_q,s)=>s.sendFile(path.join(__dirname,"public","countries.json")));
+app.post("/api/inquiries",async(q,s)=>{if(!pool)return s.status(503).json({error:"Enquiry storage is not configured."});
+const {fullName,email,countryInterest,travelMonth,groupSize,message}=q.body||{};
+if(!fullName||!email||!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email))return s.status(400).json({error:"Enter your name and a valid email."});
+try{await pool.query("INSERT INTO inquiries(full_name,email,country_interest,travel_month,group_size,message) VALUES($1,$2,$3,$4,$5,$6)",[fullName,email,countryInterest||null,travelMonth||null,groupSize||null,message||null]);s.status(201).json({message:"Thank you. Your enquiry has been received."})}catch{s.status(500).json({error:"Could not save enquiry."})}});
+app.get("/api/admin/inquiries",async(q,s)=>{if(!process.env.ADMIN_API_KEY||q.get("x-admin-key")!==process.env.ADMIN_API_KEY)return s.status(401).json({error:"Unauthorized"});if(!pool)return s.status(503).json({error:"Database not configured"});try{s.json((await pool.query("SELECT * FROM inquiries ORDER BY created_at DESC LIMIT 200")).rows)}catch{s.status(500).json({error:"Could not retrieve enquiries"})}});
+app.get("*",(_q,s)=>s.sendFile(path.join(__dirname,"public","index.html")));
+app.listen(port,()=>console.log("East Africa Discovery listening on "+port));
